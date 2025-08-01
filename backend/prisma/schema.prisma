@@ -1,0 +1,311 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  FLEET_MANAGER
+  ACCOUNTANT
+  DRIVER
+  VEHICLE_OWNER
+}
+
+enum VehicleStatus {
+  ACTIVE
+  INACTIVE
+  IN_SERVICE
+  SOLD
+}
+
+enum OwnershipType {
+  OWNED
+  LEASED
+  RENTED
+}
+
+enum ExpenseCategory {
+  FUEL
+  MAINTENANCE
+  INSURANCE
+  REGISTRATION
+  PARKING
+  TOLLS
+  FINES
+  OTHER
+}
+
+enum DocumentType {
+  REGISTRATION
+  INSURANCE
+  LEASE_CONTRACT
+  SERVICE_BOOK
+  PURCHASE_INVOICE
+  OTHER
+}
+
+enum NotificationType {
+  REGISTRATION_EXPIRY
+  INSURANCE_EXPIRY
+  SERVICE_DUE
+  LEASE_END
+  DOCUMENT_EXPIRY
+}
+
+model Organization {
+  id               String   @id @default(uuid())
+  name             String
+  subscriptionType String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  
+  users            User[]
+  vehicles         Vehicle[]
+}
+
+model User {
+  id              String   @id @default(uuid())
+  email           String   @unique
+  name            String
+  role            UserRole
+  auth0Id         String   @unique
+  phoneNumber     String?
+  organizationId  String
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  driver          Driver?
+  createdExpenses Expense[]
+  assignedVehicles VehicleAssignment[]
+  notifications   NotificationPreference[]
+  activityLogs    ActivityLog[]
+}
+
+model Driver {
+  id               String   @id @default(uuid())
+  userId           String   @unique
+  licenseNumber    String
+  licenseExpiry    DateTime
+  emergencyContact Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  
+  user             User     @relation(fields: [userId], references: [id])
+  assignments      VehicleAssignment[]
+}
+
+model Vehicle {
+  id              String        @id @default(uuid())
+  vin             String        @unique
+  plateNumber     String
+  make            String
+  model           String
+  year            Int
+  mileage         Int
+  fuelType        String
+  color           String?
+  ownershipType   OwnershipType
+  purchaseDate    DateTime?
+  purchasePrice   Decimal?      @db.Decimal(10, 2)
+  organizationId  String
+  status          VehicleStatus @default(ACTIVE)
+  imageUrl        String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  organization    Organization  @relation(fields: [organizationId], references: [id])
+  assignments     VehicleAssignment[]
+  expenses        Expense[]
+  documents       Document[]
+  maintenanceRecords MaintenanceRecord[]
+  leaseContract   LeaseContract?
+  fuelCards       FuelCard[]
+  insurancePolicies InsurancePolicy[]
+}
+
+model VehicleAssignment {
+  id           String    @id @default(uuid())
+  vehicleId    String
+  driverId     String
+  userId       String
+  assignedDate DateTime  @default(now())
+  returnedDate DateTime?
+  isActive     Boolean   @default(true)
+  notes        String?
+  
+  vehicle      Vehicle   @relation(fields: [vehicleId], references: [id])
+  driver       Driver    @relation(fields: [driverId], references: [id])
+  user         User      @relation(fields: [userId], references: [id])
+  
+  @@index([vehicleId, isActive])
+  @@index([driverId, isActive])
+}
+
+model Expense {
+  id          String          @id @default(uuid())
+  vehicleId   String
+  category    ExpenseCategory
+  amount      Decimal         @db.Decimal(10, 2)
+  date        DateTime
+  description String?
+  receiptUrl  String?
+  odometer    Int?
+  supplier    String?
+  createdById String
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  
+  vehicle     Vehicle         @relation(fields: [vehicleId], references: [id])
+  createdBy   User            @relation(fields: [createdById], references: [id])
+  
+  @@index([vehicleId, date])
+  @@index([category])
+}
+
+model Document {
+  id            String       @id @default(uuid())
+  vehicleId     String
+  type          DocumentType
+  name          String
+  documentUrl   String
+  expiryDate    DateTime?
+  reminderSent  Boolean      @default(false)
+  reminderDate  DateTime?
+  metadata      Json?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  
+  vehicle       Vehicle      @relation(fields: [vehicleId], references: [id])
+  
+  @@index([vehicleId, type])
+  @@index([expiryDate])
+}
+
+model LeaseContract {
+  id                String   @id @default(uuid())
+  vehicleId         String   @unique
+  leasingCompany    String
+  contractNumber    String
+  monthlyRate       Decimal  @db.Decimal(10, 2)
+  startDate         DateTime
+  endDate           DateTime
+  totalInstallments Int
+  paidInstallments  Int      @default(0)
+  contactPerson     String?
+  contactPhone      String?
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  vehicle           Vehicle  @relation(fields: [vehicleId], references: [id])
+}
+
+model MaintenanceRecord {
+  id              String   @id @default(uuid())
+  vehicleId       String
+  type            String   // regular, repair, inspection
+  performedAt     Int      // odometer reading
+  performedDate   DateTime
+  nextDueKm       Int?
+  nextDueDate     DateTime?
+  cost            Decimal? @db.Decimal(10, 2)
+  serviceProvider String
+  description     String
+  invoiceUrl      String?
+  parts           Json?    // array of parts used
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  vehicle         Vehicle  @relation(fields: [vehicleId], references: [id])
+  
+  @@index([vehicleId, performedDate])
+}
+
+model FuelCard {
+  id           String   @id @default(uuid())
+  cardNumber   String   @unique
+  provider     String   // OMV, NIS, MOL, etc
+  vehicleId    String?
+  isActive     Boolean  @default(true)
+  monthlyLimit Decimal? @db.Decimal(10, 2)
+  pin          String?  // encrypted
+  expiryDate   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  vehicle      Vehicle? @relation(fields: [vehicleId], references: [id])
+}
+
+model InsurancePolicy {
+  id              String   @id @default(uuid())
+  vehicleId       String
+  policyNumber    String
+  provider        String
+  type            String   // full, liability, etc
+  startDate       DateTime
+  endDate         DateTime
+  premium         Decimal  @db.Decimal(10, 2)
+  deductible      Decimal? @db.Decimal(10, 2)
+  coverageDetails Json?
+  documentUrl     String?
+  reminderSent    Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  vehicle         Vehicle  @relation(fields: [vehicleId], references: [id])
+  
+  @@index([vehicleId])
+  @@index([endDate])
+}
+
+model NotificationPreference {
+  id               String           @id @default(uuid())
+  userId           String
+  notificationType NotificationType
+  isEnabled        Boolean          @default(true)
+  daysBefore       Int              @default(30)
+  emailEnabled     Boolean          @default(true)
+  smsEnabled       Boolean          @default(false)
+  
+  user             User             @relation(fields: [userId], references: [id])
+  
+  @@unique([userId, notificationType])
+}
+
+model NotificationLog {
+  id               String           @id @default(uuid())
+  type             NotificationType
+  recipientEmail   String
+  recipientPhone   String?
+  subject          String
+  message          String
+  vehicleId        String?
+  documentId       String?
+  sentAt           DateTime         @default(now())
+  status           String           // sent, failed, pending
+  errorMessage     String?
+}
+
+model ActivityLog {
+  id          String   @id @default(uuid())
+  userId      String
+  action      String   // created, updated, deleted, etc
+  entity      String   // vehicle, expense, document, etc
+  entityId    String
+  details     Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+  
+  user        User     @relation(fields: [userId], references: [id])
+  
+  @@index([userId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
